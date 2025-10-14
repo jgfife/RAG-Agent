@@ -4,14 +4,19 @@ from pathlib import Path
 from typing import Dict, Union, List, Any
 import time
 import io
-
+import re
 import chromadb
 from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
 from chromadb.config import Settings
 
+# Chunking configuration (tunable)
+CHUNK_MAX_CHARS = 3000          # Upper bound per chunk
+CHUNK_MIN_CHARS = 1200          # Try to reach at least this unless end of page
+CHUNK_OVERLAP_CHARS = 200       # Overlap tail of previous chunk
+USE_SENTENCE_SPLIT = True        # Whether to split by sentences first (if False, hard splits)
 PDF_DIR_DEFAULT = Path(__file__).resolve().parent.parent / "documents"
 
-def extractPdfText(pdf_path: Union[str, Path]) -> Dict[str, Any]:
+def extract_pdf_text(pdf_path: Union[str, Path]) -> Dict[str, Any]:
     """Extract text and basic metadata from a PDF.
 
     Returns a dict with keys:
@@ -67,7 +72,7 @@ def extractPdfText(pdf_path: Union[str, Path]) -> Dict[str, Any]:
     }
     return {"text": full_text, "pages": pages, "meta": meta}
 
-def loadDataToChroma(
+def load_data_to_chroma(
     collection: chromadb.Collection, 
     data: List[Dict[str, Any]]
 ) -> int:
@@ -110,11 +115,77 @@ def loadDataToChroma(
     
     return collection.count()
 
-def processDocuments(doc_dir: Union[str, Path] = PDF_DIR_DEFAULT) -> List[Dict[str, Any]]:
-    """Extract all PDFs into page-level Chroma-ready records.
+def split_into_sentences(text: str) -> List[str]:
+    if not USE_SENTENCE_SPLIT:
+        return [text]
+    
+    regex = re.compile(r'(?<=[.!?])\s+(?=[A-Z0-9])')
+    sentences = []
+    for part in regex.split(text):
+        part = part.strip()
+        if part:
+            sentences.append(part)
+    return sentences or [text]
 
-    Returns a list of dicts each with keys: id, text, meta
-    where id is stable per (document,page).
+
+def build_chunks_from_sentences(sentences: List[str]) -> List[str]:
+    chunks: List[str] = []
+    current: List[str] = []
+    current_len = 0
+
+    for sent in sentences:
+        slen = len(sent)
+        # If sentence itself is too large, hard split it
+        if slen > CHUNK_MAX_CHARS:
+            if current:
+                chunks.append(" ".join(current).strip())
+                current, current_len = [], 0
+            for start in range(0, slen, CHUNK_MAX_CHARS):
+                piece = sent[start:start + CHUNK_MAX_CHARS]
+                chunks.append(piece.strip())
+            continue
+
+        if current_len + slen + 1 <= CHUNK_MAX_CHARS:
+            current.append(sent)
+            current_len += slen + 1
+        else:
+            # finalize current
+            if current:
+                chunk_text = " ".join(current).strip()
+                chunks.append(chunk_text)
+                # prepare overlap
+                if CHUNK_OVERLAP_CHARS > 0:
+                    overlap = chunk_text[-CHUNK_OVERLAP_CHARS:]
+                    current = [overlap]
+                    current_len = len(overlap)
+                else:
+                    current, current_len = [], 0
+            # add new sentence (may start new chunk)
+            current.append(sent)
+            current_len = sum(len(s) + 1 for s in current)
+
+    if current:
+        chunks.append(" ".join(current).strip())
+
+    # Merge tiny tail chunk if below minimum and more than one chunk
+    if len(chunks) > 1 and len(chunks[-1]) < CHUNK_MIN_CHARS:
+        prev = chunks[-2]
+        merged = prev + " " + chunks[-1]
+        if len(merged) <= CHUNK_MAX_CHARS:
+            chunks[-2] = merged.strip()
+            chunks.pop()
+    return chunks
+
+
+def chunk_page_text(page_text: str) -> List[str]:
+    sentences = split_into_sentences(page_text)
+    return build_chunks_from_sentences(sentences)
+
+
+def process_documents(doc_dir: Union[str, Path] = PDF_DIR_DEFAULT) -> List[Dict[str, Any]]:
+    """Extract all PDFs into chunk-level Chroma-ready records.
+
+    Page texts are further split into overlapping chunks for better retrieval granularity.
     """
     doc_dir = Path(doc_dir)
     if not doc_dir.exists() or not doc_dir.is_dir():
@@ -123,31 +194,41 @@ def processDocuments(doc_dir: Union[str, Path] = PDF_DIR_DEFAULT) -> List[Dict[s
     records: List[Dict[str, Any]] = []
     for pdf_path in sorted(doc_dir.glob("*.pdf")):
         try:
-            extracted = extractPdfText(pdf_path)
+            extracted = extract_pdf_text(pdf_path)
         except Exception as exc:
             print(f"[WARN] Extraction failed for {pdf_path.name}: {exc}")
             continue
 
-        # TODO: better chunking strategy (e.g. overlapping windows)
         doc_meta = extracted["meta"]
         pages = extracted["pages"]
-        total = len(pages)
+        total_pages = len(pages)
+        chunk_counter = 0
+
         for page in pages:
             page_number = page["index"] + 1
-            text = page["text"]
-            rec_meta = {
-                **doc_meta,
-                "page_number": page_number,
-                "page_char_count": page["char_count"],
-                "chunk_index": page["index"],
-                "total_chunks": total,
-            }
-            records.append({
-                "id": f"{doc_meta['source_name']}#p{page_number}",
-                "text": text,
-                "meta": rec_meta,
-            })
-        print(f"Processed {pdf_path.name}: {doc_meta['page_count']} pages, size={doc_meta['file_size_bytes']} bytes")
+            text = page["text"].strip()
+            if not text:
+                continue
+            page_chunks = chunk_page_text(text)
+            for local_idx, chunk_text in enumerate(page_chunks):
+                chunk_counter += 1
+                rec_meta = {
+                    **doc_meta,
+                    "page_number": page_number,
+                    "page_char_count": page["char_count"],
+                    "chunk_index": chunk_counter - 1,
+                    "page_chunk_index": local_idx,
+                    "page_total_chunks": len(page_chunks),
+                    "total_pages": total_pages,
+                    "approx_chars": len(chunk_text),
+                    "overlap_chars": CHUNK_OVERLAP_CHARS,
+                }
+                records.append({
+                    "id": f"{doc_meta['source_name']}#p{page_number}#c{local_idx+1}",
+                    "text": chunk_text,
+                    "meta": rec_meta,
+                })
+        print(f"Processed {pdf_path.name}: {doc_meta['page_count']} pages -> {chunk_counter} chunks")
 
     return records
 
@@ -162,7 +243,7 @@ def main() -> List[Dict[str, Any]]:
         metadata={"hnsw:space": "cosine"}
     )
 
-    records = processDocuments()
+    records = process_documents()
     if not records:
         print("No PDF documents found to index.")
         return []
@@ -170,7 +251,7 @@ def main() -> List[Dict[str, Any]]:
     existing = collection.count()
     if existing < len(records):
         print(f"\nIndexing {len(records)} page chunks into collection 'ai_research_docs' (currently {existing}).")
-        loadDataToChroma(collection, records)
+        load_data_to_chroma(collection, records)
     else:
         print(f"Collection already has {existing} items; skipping re-index.")
 
