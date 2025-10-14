@@ -27,11 +27,8 @@ install-deb:
 install-pip: $(VENV)
 	. $(VENV)/bin/activate; pip3 install --upgrade -r requirements.txt
 
-chroma: $(VENV)
-	. $(VENV)/bin/activate; python3 src/chroma.py
-
-pinecone: $(VENV)
-	. $(VENV)/bin/activate; python3 src/pineconeDB.py
+index: $(VENV)
+	. $(VENV)/bin/activate; python3 src/indexPipeline.py
 
 clean:
 	rm -rf db/chroma/*

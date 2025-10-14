@@ -3,3 +3,5 @@ numpy>=1.26
 requests>=2.31.0
 pinecone
 sentence-transformers>=2.2.0
+pypdf>=4.0.0
+

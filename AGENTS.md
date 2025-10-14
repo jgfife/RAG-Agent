@@ -1,35 +1,25 @@
-# Agent Instructions for Vector Database Assignment
+# AGENTS.md (Vector DB / RAG Project)
 
-## Build/Test Commands
-- `make install` - Install environment and dependencies (creates .virtual_environment)
-- `make chroma` - Run the main ChromaDB demo (equivalent to `make chroma-demo`)
-- `. .virtual_environment/bin/activate; python3 src/chroma.py` - Run chroma demo directly
-- `make clean` - Delete contents of db/chroma folder for fresh start
-- No test framework configured - run demos to verify functionality
-- Individual modules can be tested with: `. .virtual_environment/bin/activate; python3 src/<module>.py`
+Build & Run:
+1. Create env: `make install` (apt packages + pip deps)
+2. Activate: `. .virtual_environment/bin/activate`
+3. Index pipeline: `make index` (runs `src/indexPipeline.py`)
+4. Chroma demo: `python3 src/chroma.py` (or add a make target if missing)
+5. Clean DB: `make clean` (wipes `db/chroma/*`)
+6. Module check (acts as “single test”): `python3 src/<module>.py`
+7. No formal tests; treat each runnable module as validation.
 
-## Code Style Guidelines
-- Use Python 3.12+ with type hints (`from __future__ import annotations`)
-- Follow PEP 8 formatting with 4-space indentation
-- Use `snake_case` for variables/functions, `PascalCase` for classes
-- Include docstrings for modules and main functions with Args/Returns sections
-- Import order: standard library, third-party, local imports
-- Use pathlib.Path for file operations, not string paths
-- Use descriptive variable names (e.g., `dbDir`, `collection`, `query_result`)
-- Add blank lines to separate logical sections
-- Use f-strings for string formatting and descriptive print statements
-- Include shebang `#!/usr/bin/env python3` for executable scripts
-- Type hints: Use `str | Path` for path parameters, `List[Dict[str, Any]]` for data structures
-- Handle encoding explicitly: use `encoding='utf-8'` for file operations
-- Error handling: Use explicit exception handling where needed, especially for file I/O and external API calls
-
-## Dependencies
-- Core: chromadb>=0.5.0, numpy>=1.26, requests>=2.31.0
-- ChromaDB uses sentence-transformers/all-MiniLM-L6-v2 for embeddings
-- Requires python3.12-venv and ffmpeg system packages (via `make install-deb`)
-
-## Project Structure
-- `src/` - Main source code (chroma.py, db.py, generate_queries.py)
-- `db/chroma/` - ChromaDB persistent storage (auto-created)
-- `dataset/` - Data files and generated queries
-- Virtual environment in `.virtual_environment/`
+Style & Conventions:
+8. Python 3.12+, add `from __future__ import annotations` at top.
+9. Imports grouped: stdlib, third-party, local; alphabetical within group.
+10. Naming: `snake_case` funcs/vars, `PascalCase` classes, constants UPPER_SNAKE.
+11. Use `pathlib.Path` for filesystem paths; type as `str | Path` in APIs.
+12. Provide module + public function docstrings (Args / Returns / Raises).
+13. Add shebang `#!/usr/bin/env python3` for executable scripts only.
+14. Prefer f-strings; avoid bare prints—add context (e.g., prefix action/result).
+15. Explicit encodings: `open(path, 'r', encoding='utf-8')`.
+16. Error handling: catch specific exceptions (e.g., `FileNotFoundError`), re-raise with context; avoid silent except.*
+17. Data structures: use `list[dict[str, Any]]` modern generics.
+18. Keep functions < ~40 lines; refactor pipeline stages into helpers.
+19. No Cursor / Copilot rule files present—nothing extra to enforce.
+20. Keep dependencies minimal; do not pin beyond `requirements.txt` without need.

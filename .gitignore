@@ -3,6 +3,6 @@ __pycache__
 .DS_Store
 syntax_demo.py
 
-dataset/*
+documents/*
 db/chroma/*
 logs/*
