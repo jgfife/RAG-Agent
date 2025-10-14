@@ -1,37 +1,71 @@
-from pathlib import Path
-from typing import Dict
+from __future__ import annotations
+
 from pathlib import Path
 from typing import Dict, Union, List, Any
 import time
+import io
+
 import chromadb
 from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
 from chromadb.config import Settings
 
 PDF_DIR_DEFAULT = Path(__file__).resolve().parent.parent / "documents"
 
-def extractPdfText(pdf_path: Union[str, Path]) -> str:
+def extractPdfText(pdf_path: Union[str, Path]) -> Dict[str, Any]:
+    """Extract text and basic metadata from a PDF.
+
+    Returns a dict with keys:
+        text: full concatenated text
+        pages: list of {index, text, char_count}
+        meta: document-level metadata (source_name, source_path, file_size_bytes, modified_time, page_count)
+    """
     pdf_path = Path(pdf_path)
+
+    try:
+        with open(pdf_path, "rb") as fh:
+            file_bytes = fh.read()
+    except FileNotFoundError as e:
+        raise FileNotFoundError(f"PDF not found: {pdf_path}") from e
+
+    pages: List[Dict[str, Any]] = []
+    full_text_parts: List[str] = []
+
     try:
         try:
             from pypdf import PdfReader  # preferred modern package
         except ImportError:
             from PyPDF2 import PdfReader  # type: ignore
-        reader = PdfReader(str(pdf_path))
-        parts = []
-        for page in reader.pages: #TODO: generate metatdata with page numbers
+        reader = PdfReader(io.BytesIO(file_bytes))
+        for idx, page in enumerate(reader.pages):
             try:
-                parts.append(page.extract_text() or "")
+                page_text = page.extract_text() or ""
             except Exception:
-                parts.append("")
-        return "\n".join(parts)
+                page_text = ""
+            pages.append({
+                "index": idx,
+                "text": page_text,
+                "char_count": len(page_text),
+            })
+            full_text_parts.append(page_text)
     except ImportError:
         try:
             from pdfminer.high_level import extract_text as pdfminer_extract_text  # type: ignore
-            return pdfminer_extract_text(str(pdf_path))
+            overall = pdfminer_extract_text(str(pdf_path))
+            pages = [{"index": 0, "text": overall, "char_count": len(overall)}]
+            full_text_parts = [overall]
         except ImportError as e:
             raise RuntimeError(
                 "No PDF extraction library available. Install 'pypdf' or 'pdfminer.six'."
             ) from e
+
+    full_text = "\n".join(full_text_parts)
+    stat = pdf_path.stat()
+    meta = {
+        "source_name": pdf_path.name,
+        "file_size_bytes": stat.st_size,
+        "page_count": len(pages),
+    }
+    return {"text": full_text, "pages": pages, "meta": meta}
 
 def loadDataToChroma(
     collection: chromadb.Collection, 
@@ -56,7 +90,6 @@ def loadDataToChroma(
     for i in range(0, len(data), batch_size):
         batch = data[i:i + batch_size]
         
-        # TODO: make ids, documents, and metadatas not be the movie dataset
         ids = [item["id"] for item in batch]
         documents = [item["text"] for item in batch]
         metadatas = [item["meta"] for item in batch]
@@ -77,57 +110,71 @@ def loadDataToChroma(
     
     return collection.count()
 
-def processDocuments(doc_dir: Union[str, Path] = PDF_DIR_DEFAULT) -> Dict[str, str]:
-    """
-    Reads every .pdf in the documents folder, extracts text to memory,
-    prints each file's text to stdout bracketed by BEGIN/END markers,
-    and returns a dict {filename: text}.
+def processDocuments(doc_dir: Union[str, Path] = PDF_DIR_DEFAULT) -> List[Dict[str, Any]]:
+    """Extract all PDFs into page-level Chroma-ready records.
+
+    Returns a list of dicts each with keys: id, text, meta
+    where id is stable per (document,page).
     """
     doc_dir = Path(doc_dir)
     if not doc_dir.exists() or not doc_dir.is_dir():
         raise FileNotFoundError(f"Documents directory not found: {doc_dir}")
 
-    results: Dict[str, str] = {}
+    records: List[Dict[str, Any]] = []
     for pdf_path in sorted(doc_dir.glob("*.pdf")):
         try:
-            text = extractPdfText(pdf_path)
+            extracted = extractPdfText(pdf_path)
         except Exception as exc:
-            text = f"[ERROR extracting {pdf_path.name}: {exc}]"
-        results[pdf_path.name] = text
+            print(f"[WARN] Extraction failed for {pdf_path.name}: {exc}")
+            continue
 
-        print(f"--- BEGIN {pdf_path.name} ---")
-        print(text)
-        print(f"--- END {pdf_path.name} ---\n")
+        # TODO: better chunking strategy (e.g. overlapping windows)
+        doc_meta = extracted["meta"]
+        pages = extracted["pages"]
+        total = len(pages)
+        for page in pages:
+            page_number = page["index"] + 1
+            text = page["text"]
+            rec_meta = {
+                **doc_meta,
+                "page_number": page_number,
+                "page_char_count": page["char_count"],
+                "chunk_index": page["index"],
+                "total_chunks": total,
+            }
+            records.append({
+                "id": f"{doc_meta['source_name']}#p{page_number}",
+                "text": text,
+                "meta": rec_meta,
+            })
+        print(f"Processed {pdf_path.name}: {doc_meta['page_count']} pages, size={doc_meta['file_size_bytes']} bytes")
 
-    return results
+    return records
 
-def main() -> Dict[str, str]:
-    """Entry point for the RAG agent.
-
-    Currently: reads all PDFs in the default documents directory
-    via `log_all_pdf_texts` and returns a mapping of filename to text.
-    Extend this function later to add embedding, vector store loading,
-    and retrieval logic.
-    """
+def main() -> List[Dict[str, Any]]:
+    """Index all PDFs into Chroma at a page granularity and return records."""
     dbDir = Path("./db")
     client = chromadb.PersistentClient(path=str(dbDir), settings=Settings(anonymized_telemetry=False))
 
-    # Create or get a collection with an embedding function
-    # Note: you can add HNSW params via metadata if desired (implementation-dependent)
     collection = client.get_or_create_collection(
         name="ai_research_docs",
         embedding_function=SentenceTransformerEmbeddingFunction(model_name="sentence-transformers/all-MiniLM-L6-v2"),
         metadata={"hnsw:space": "cosine"}
     )
 
-    docs = processDocuments()
-    if collection.count() != len(docs):
-        print(f"\nDataset Loading:")
-        print(f"Loading {len(docs)} items into ChromaDB collection 'ai_research_docs'...")
-        count = loadDataToChroma(collection, docs)
-        print(f"{count} items are contained in the ChromaDB collection 'ai_research_docs'")
+    records = processDocuments()
+    if not records:
+        print("No PDF documents found to index.")
+        return []
+
+    existing = collection.count()
+    if existing < len(records):
+        print(f"\nIndexing {len(records)} page chunks into collection 'ai_research_docs' (currently {existing}).")
+        loadDataToChroma(collection, records)
     else:
-        print(f"\nDataset already loaded")
+        print(f"Collection already has {existing} items; skipping re-index.")
+
+    return records
 
 
 if __name__ == "__main__":

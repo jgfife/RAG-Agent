@@ -4,5 +4,5 @@ __pycache__
 syntax_demo.py
 
 documents/*
-db/chroma/*
+db/*
 logs/*
