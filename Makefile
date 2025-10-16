@@ -27,8 +27,11 @@ install-deb:
 install-pip: $(VENV)
 	. $(VENV)/bin/activate; pip3 install --upgrade -r requirements.txt
 
+agent: $(VENV)
+	. $(VENV)/bin/activate; python3 src/retrievalPipeline.py
+
 index: $(VENV)
-	. $(VENV)/bin/activate; python3 src/indexPipeline.py
+	. $(VENV)/bin/activate; python3 src/retrievalPipeline.py -b
 
 clean:
 	rm -rf db/*

@@ -6,8 +6,6 @@ import time
 import io
 import re
 import chromadb
-from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
-from chromadb.config import Settings
 
 # Chunking configuration (tunable)
 CHUNK_MAX_CHARS = 3000          # Upper bound per chunk
@@ -182,7 +180,7 @@ def chunk_page_text(page_text: str) -> List[str]:
     return build_chunks_from_sentences(sentences)
 
 
-def process_documents(doc_dir: Union[str, Path] = PDF_DIR_DEFAULT) -> List[Dict[str, Any]]:
+def process_documents(collection: chromadb.Collection, doc_dir: Union[str, Path] = PDF_DIR_DEFAULT) -> List[Dict[str, Any]]:
     """Extract all PDFs into chunk-level Chroma-ready records.
 
     Page texts are further split into overlapping chunks for better retrieval granularity.
@@ -230,24 +228,11 @@ def process_documents(doc_dir: Union[str, Path] = PDF_DIR_DEFAULT) -> List[Dict[
                 })
         print(f"Processed {pdf_path.name}: {doc_meta['page_count']} pages -> {chunk_counter} chunks")
 
-    return records
-
-def main() -> List[Dict[str, Any]]:
-    """Index all PDFs into Chroma at a page granularity and return records."""
-    dbDir = Path("./db")
-    client = chromadb.PersistentClient(path=str(dbDir), settings=Settings(anonymized_telemetry=False))
-
-    collection = client.get_or_create_collection(
-        name="ai_research_docs",
-        embedding_function=SentenceTransformerEmbeddingFunction(model_name="sentence-transformers/all-MiniLM-L6-v2"),
-        metadata={"hnsw:space": "cosine"}
-    )
-
-    records = process_documents()
     if not records:
         print("No PDF documents found to index.")
         return []
 
+    # save to ChromaDB
     existing = collection.count()
     if existing < len(records):
         print(f"\nIndexing {len(records)} page chunks into collection 'ai_research_docs' (currently {existing}).")
@@ -255,8 +240,4 @@ def main() -> List[Dict[str, Any]]:
     else:
         print(f"Collection already has {existing} items; skipping re-index.")
 
-    return records
-
-
-if __name__ == "__main__":
-    main()
+    return
