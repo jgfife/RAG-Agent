@@ -37,7 +37,7 @@ Enter your question (blank to exit): What is retrieval augmented generation?
 To reset state: `make clean` then rebuild.
 
 ## 5. Dependencies
-See `requirements.txt`: chromadb, sentence-transformers, numpy, requests, pypdf. Optional: install `pdfminer.six` for fallback extraction.
+See `requirements.txt`: chromadb, sentence-transformers, numpy, requests, pypdf.
 
 ## 6. Troubleshooting
 - Missing answers: ensure Ollama server running (`ollama run llama3.1` pulls model).
