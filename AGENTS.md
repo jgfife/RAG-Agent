@@ -1,25 +1,20 @@
 # AGENTS.md (Vector DB / RAG Project)
 
 Build & Run:
-1. Create env: `make install` (apt packages + pip deps)
-2. Activate: `. .virtual_environment/bin/activate`
-3. Index pipeline: `make index` (runs `src/indexPipeline.py`)
-4. Chroma demo: `python3 src/chroma.py` (or add a make target if missing)
-5. Clean DB: `make clean` (wipes `db/chroma/*`)
-6. Module check (acts as “single test”): `python3 src/<module>.py`
-7. No formal tests; treat each runnable module as validation.
+1. Create venv: `make install` then activate: `. .virtual_environment/bin/activate`.
+2. Index + retrieval: `make index` (build) then `make agent` (query). Add `-b` to force rebuild.
+3. Chroma demo: `python3 src/chroma.py` (if present) else skip.
+4. Clean DB: `make clean` (removes `db/*`). Rebuild after cleaning.
+5. Single module validation (pseudo-test): `python3 src/<module>.py` (e.g. `python3 src/indexPipeline.py`).
+6. Lightweight syntax check: `python -m py_compile src/*.py`; optional lint if `ruff` installed: `ruff check src`.
 
 Style & Conventions:
-8. Python 3.12+, add `from __future__ import annotations` at top.
-9. Imports grouped: stdlib, third-party, local; alphabetical within group.
-10. Naming: `snake_case` funcs/vars, `PascalCase` classes, constants UPPER_SNAKE.
-11. Use `pathlib.Path` for filesystem paths; type as `str | Path` in APIs.
-12. Provide module + public function docstrings (Args / Returns / Raises).
-13. Add shebang `#!/usr/bin/env python3` for executable scripts only.
-14. Prefer f-strings; avoid bare prints—add context (e.g., prefix action/result).
-15. Explicit encodings: `open(path, 'r', encoding='utf-8')`.
-16. Error handling: catch specific exceptions (e.g., `FileNotFoundError`), re-raise with context; avoid silent except.*
-17. Data structures: use `list[dict[str, Any]]` modern generics.
-18. Keep functions < ~40 lines; refactor pipeline stages into helpers.
-19. No Cursor / Copilot rule files present—nothing extra to enforce.
-20. Keep dependencies minimal; do not pin beyond `requirements.txt` without need.
+7. Python 3.12+; first line (non-shebang) `from __future__ import annotations`.
+8. Imports grouped: stdlib, third-party, local; alphabetical within each group.
+9. Naming: snake_case functions/vars, PascalCase classes, UPPER_SNAKE constants.
+10. Use `pathlib.Path`; accept `str | Path` in public APIs; avoid bare `os.path`.
+11. Docstrings (module + public funcs) include Args / Returns / Raises; prefer precise types (`list[dict[str, Any]]`).
+12. Error handling: catch specific exceptions, re-raise with context; never silent `except:`.
+13. Output: prefer contextual f-strings; avoid bare prints (prefix action/result); shebang only for direct executables.
+14. Encoding: always explicit when opening text; binary only for PDFs (`open(path, 'rb')`).
+15. Dependencies: keep minimal; no Cursor/Copilot rule files present; follow this guide for agents.

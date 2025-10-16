@@ -1,30 +1,56 @@
-# CS 6300 RAG Agent
+# CS6300 RAG Agent
 
-Minimal Retrieval-Augmented Generation indexing prototype. Current functionality: read all PDFs in a `documents/` directory, extract text, and (utility functions prepared) support loading structured data into a ChromaDB collection.
+Retrieval-Augmented Generation prototype indexing academic PDFs into a persistent ChromaDB collection and answering questions via local Ollama (LLM) using contextual chunks.
 
-## 1. Environment Setup
+## 1. Features
+- PDF extraction with pypdf (fallback: pdfminer.six if added manually)
+- Sentence-aware chunking + overlap (config constants in `indexPipeline.py`)
+- Batch upsert to Chroma (persistent under `./db`)
+- Embeddings: `sentence-transformers/all-MiniLM-L6-v2`
+- Interactive retrieval + prompt construction (`retrievalPipeline.py`)
+- Local Ollama completion (HTTP `localhost:11434`)
+
+## 2. Environment Setup
 ```bash
-make install            # creates .virtual_environment + installs deps
+make install              # creates .virtual_environment + installs pip deps
 . .virtual_environment/bin/activate
 ```
-System packages needed (apt): `python3.12-venv ffmpeg` (handled by `make install-deb`).
+System packages (apt): `python3.12-venv ffmpeg` (auto via `make install-deb`).
 
-## 2. Add Documents
-Place source PDFs in `documents/` at repo root (create if missing). Only `.pdf` files are processed.
+## 3. Documents
+Place source PDFs in `documents/` (repo root). Only `.pdf` processed; empty dir yields a notice.
 
-## 3. Run Index Pipeline
+## 4. Build / Query
 ```bash
-make index              # or: python3 src/indexPipeline.py
+make index                # rebuild index (forces -b) then prompt for a question
+make agent                # reuse existing index, just prompt
+make clean                # remove db/* (must rebuild afterward)
 ```
-Outputs extracted text for each PDF bracketed by BEGIN/END markers; returns a mapping (filename -> text).
+Example session:
+```bash
+make index
+Enter your question (blank to exit): What is retrieval augmented generation?
+```
 
-## 4. Extending to Full RAG
-Next steps you can implement: chunking, embedding via sentence-transformers, persisting to Chroma (`chromadb.Client().get_or_create_collection()` + `upsert`), retrieval + prompt assembly. See `load_data_to_chroma` helper for batch logic.
+## 5. Direct Scripts
+- Retrieval / interactive: `python3 src/retrievalPipeline.py [-b]`
+- (Index helper only used programmatically; do not run `indexPipeline.py` standalone.)
 
-## 5. Dependencies (requirements.txt)
-chromadb, sentence-transformers, numpy, requests, pypdf (or PyPDF2 fallback), pypdf/pdfminer.six for extraction.
+## 6. Lightweight Checks
+```bash
+python -m py_compile src/*.py         # syntax
+ruff check src                        # optional if ruff installed
+python3 src/retrievalPipeline.py -b   # pseudo-test (build + query prompt)
+```
 
-## 6. Troubleshooting
-Missing text? Ensure `pypdf` installed; large PDFs may produce empty strings for pages without extractable text. If neither `pypdf` nor `pdfminer.six` is present a RuntimeError is raised. Use `make clean` to clear any future vector store directory.
+## 7. Dependencies
+See `requirements.txt`: chromadb, sentence-transformers, numpy, requests, pypdf, pinecone (future use). Optional: install `pdfminer.six` for fallback extraction.
 
-See AGENTS.md for coding standards and contribution guidelines.
+## 8. Troubleshooting
+- Missing answers: ensure Ollama server running (`ollama run llama3.1` pulls model).
+- Empty pages: some PDFs lack extractable text; page skipped.
+- Vector store mismatch: run `make clean` then `make index`.
+- Import errors: activate venv (`. .virtual_environment/bin/activate`).
+
+## 9. Standards
+Refer to `AGENTS.md` for code style (imports grouping, typing, error handling, docstrings, path usage). Keep additions minimal & typed.
